@@ -55,7 +55,7 @@ captureBtn.addEventListener('click', async () => {
       }
       
       if (response && response.success) {
-        updateStatus('Capture started...', 'info');
+        updateStatus('Scrolling and capturing...', 'info');
       }
     });
     
