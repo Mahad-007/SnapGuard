@@ -104,6 +104,14 @@ async function blobToDataUrl(blob) {
 
 // Finish capture session and stitch images
 async function finishCaptureSession() {
+  if (!captureSession) {
+    console.error('No capture session active');
+    return;
+  }
+  
+  // Wait a bit more to ensure all async captures complete
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  
   if (capturedImages.length === 0) {
     console.error('No images captured');
     handleCaptureError('No images captured');
@@ -111,23 +119,34 @@ async function finishCaptureSession() {
   }
   
   try {
-    console.log(`Stitching ${capturedImages.length} images...`);
+    console.log(`Stitching ${capturedImages.length} of ${captureSession.totalSections} expected images...`);
     
-    // Sort images by index
+    // Sort images by index to ensure correct order
     capturedImages.sort((a, b) => a.index - b.index);
     
+    // Log captured sections for debugging
+    const capturedIndicesList = capturedImages.map(img => img.index).join(', ');
+    console.log(`Captured sections: ${capturedIndicesList}`);
+    
     // Calculate total height (accounting for overlap)
-    const overlap = 10; // pixels of overlap between sections
+    const overlap = 20; // pixels of overlap between sections (matches scrollStep calculation)
     let totalHeight = capturedImages[0].height;
     const width = capturedImages[0].width;
     
     for (let i = 1; i < capturedImages.length; i++) {
+      // Subtract overlap to avoid duplication
       totalHeight += capturedImages[i].height - overlap;
     }
+    
+    console.log(`Final stitched image dimensions: ${width}x${totalHeight}`);
     
     // Create canvas for stitching
     const canvas = new OffscreenCanvas(width, totalHeight);
     const ctx = canvas.getContext('2d');
+    
+    // Set white background (in case of transparency)
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, width, totalHeight);
     
     // Draw images onto canvas
     let currentY = 0;
@@ -163,8 +182,9 @@ async function finishCaptureSession() {
       saveAs: false
     });
     
-    console.log(`Screenshot saved: ${filename}`);
+    console.log(`✓ Screenshot saved: ${filename} (${capturedImages.length} sections stitched)`);
     capturedImages = [];
+    capturedIndices.clear();
     captureSession = null;
     
     // Notify popup of completion
