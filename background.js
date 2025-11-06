@@ -3,6 +3,7 @@
 
 let captureSession = null;
 let capturedImages = [];
+let capturedIndices = new Set(); // Track which section indices have been captured
 
 // Listen for messages from content script and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -30,12 +31,19 @@ function startCaptureSession(totalSections) {
     startTime: Date.now()
   };
   capturedImages = [];
+  capturedIndices.clear(); // Reset captured indices
   console.log(`Starting capture session: ${totalSections} sections`);
 }
 
 // Capture a single section of the page
 async function captureSection(tabId, sectionIndex, scrollY) {
   try {
+    // Check if this section was already captured (prevent duplicates)
+    if (capturedIndices.has(sectionIndex)) {
+      console.warn(`Section ${sectionIndex} already captured, skipping duplicate`);
+      return;
+    }
+    
     const dataUrl = await chrome.tabs.captureVisibleTab(null, {
       format: 'png',
       quality: 100
@@ -44,15 +52,19 @@ async function captureSection(tabId, sectionIndex, scrollY) {
     // Convert data URL to image to get dimensions
     const img = await dataUrlToImage(dataUrl);
     
+    // Mark this index as captured
+    capturedIndices.add(sectionIndex);
+    
     capturedImages.push({
       index: sectionIndex,
       dataUrl: dataUrl,
       image: img,
       width: img.width,
-      height: img.height
+      height: img.height,
+      scrollY: scrollY
     });
     
-    console.log(`Captured section ${sectionIndex + 1}/${captureSession.totalSections}`);
+    console.log(`Captured section ${sectionIndex + 1}/${captureSession.totalSections} at scrollY: ${scrollY}`);
     
   } catch (error) {
     console.error(`Error capturing section ${sectionIndex}:`, error);
@@ -169,6 +181,7 @@ async function finishCaptureSession() {
 // Handle capture errors
 function handleCaptureError(error) {
   capturedImages = [];
+  capturedIndices.clear();
   captureSession = null;
   
   chrome.runtime.sendMessage({

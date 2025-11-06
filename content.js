@@ -1,12 +1,14 @@
 // Content script for Full Page Screenshot Extension
 // Handles scrolling through the page and coordinates with background script for captures
 
-let isCapturing = false;
-let capturedSections = 0;
+// Use a global flag to prevent multiple instances
+if (typeof window.snapGuardCapturing === 'undefined') {
+  window.snapGuardCapturing = false;
+}
 
 // Listen for capture request from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'startCapture' && !isCapturing) {
+  if (message.action === 'startCapture' && !window.snapGuardCapturing) {
     startCapture();
     sendResponse({ success: true });
   }
@@ -15,28 +17,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Main capture function that scrolls through the page
 async function startCapture() {
-  if (isCapturing) return;
+  if (window.snapGuardCapturing) {
+    console.warn('Capture already in progress');
+    return;
+  }
   
-  isCapturing = true;
-  capturedSections = 0;
+  window.snapGuardCapturing = true;
   
   try {
-    // Get page dimensions
+    // Get page dimensions - use the maximum scrollable height
     const pageHeight = Math.max(
       document.body.scrollHeight,
       document.body.offsetHeight,
-      document.documentElement.clientHeight,
       document.documentElement.scrollHeight,
-      document.documentElement.offsetHeight
+      document.documentElement.offsetHeight,
+      document.documentElement.clientHeight
     );
     
     const viewportHeight = window.innerHeight;
-    const scrollStep = viewportHeight - 10; // 10px overlap to avoid gaps
+    const scrollStep = Math.max(viewportHeight - 20, viewportHeight * 0.9); // 20px overlap to avoid gaps
+    const maxScrollY = Math.max(0, pageHeight - viewportHeight);
     const totalSections = Math.ceil(pageHeight / scrollStep);
     
-    // Reset scroll position to top
+    console.log(`Page height: ${pageHeight}, Viewport: ${viewportHeight}, Sections: ${totalSections}`);
+    
+    // Reset scroll position to top with multiple methods for reliability
     window.scrollTo(0, 0);
-    await waitForScroll();
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    
+    // Wait for scroll to actually reach top
+    await waitForScrollComplete(0, 1000);
+    
+    // Verify we're at the top
+    const initialScroll = window.scrollY || window.pageYOffset || document.documentElement.scrollTop;
+    if (initialScroll > 5) {
+      console.warn(`Warning: Could not scroll to top. Current position: ${initialScroll}`);
+    }
     
     // Notify background script to start new capture session
     chrome.runtime.sendMessage({
@@ -46,30 +63,59 @@ async function startCapture() {
     
     // Scroll and capture each section
     for (let i = 0; i < totalSections; i++) {
-      const scrollY = Math.min(i * scrollStep, pageHeight - viewportHeight);
+      // Calculate target scroll position
+      let targetScrollY = Math.min(i * scrollStep, maxScrollY);
       
-      // Scroll to position
-      window.scrollTo(0, scrollY);
-      await waitForScroll();
+      // For the last section, ensure we capture the bottom
+      if (i === totalSections - 1) {
+        targetScrollY = maxScrollY;
+      }
+      
+      const previousScrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop;
+      
+      // Scroll to position using multiple methods for reliability
+      window.scrollTo(0, targetScrollY);
+      document.documentElement.scrollTop = targetScrollY;
+      document.body.scrollTop = targetScrollY;
+      
+      // Force a reflow
+      void document.documentElement.offsetHeight;
+      
+      // Wait for scroll to complete with longer timeout
+      await waitForScrollComplete(targetScrollY, 2000);
+      
+      // Verify scroll actually happened
+      const currentScrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop;
+      
+      // Check if scroll actually changed (except for first section)
+      if (i > 0 && Math.abs(currentScrollY - previousScrollY) < 5) {
+        console.warn(`Scroll may not have changed: ${previousScrollY} -> ${currentScrollY}. Skipping duplicate.`);
+        // Skip this section to avoid duplicate
+        continue;
+      }
+      
+      // Additional delay to ensure rendering is complete (images, lazy content, etc.)
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       // Request capture from background script
       await new Promise((resolve) => {
         chrome.runtime.sendMessage({
           action: 'captureSection',
           sectionIndex: i,
-          scrollY: scrollY
+          scrollY: currentScrollY
         }, (response) => {
           if (response && response.success) {
-            capturedSections++;
+            console.log(`Captured section ${i + 1}/${totalSections} at scrollY: ${currentScrollY}`);
             resolve();
           } else {
+            console.error(`Failed to capture section ${i + 1}`);
             resolve();
           }
         });
       });
       
-      // Small delay to ensure capture completes
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Small delay between captures
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
     
     // Notify background script that all sections are captured
@@ -78,7 +124,7 @@ async function startCapture() {
     });
     
     // Reset scroll to top
-    window.scrollTo(0, 0);
+    window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
     
   } catch (error) {
     console.error('Capture error:', error);
@@ -87,31 +133,49 @@ async function startCapture() {
       error: error.message
     });
   } finally {
-    isCapturing = false;
+    window.snapGuardCapturing = false;
   }
 }
 
-// Wait for scroll animation to complete
-function waitForScroll() {
+// Wait for scroll to reach target position and stabilize
+function waitForScrollComplete(targetY, maxWaitTime = 2000) {
   return new Promise((resolve) => {
-    let lastScrollY = window.scrollY;
-    let scrollTimeout;
+    const tolerance = 5; // Allow 5px tolerance
+    const startTime = Date.now();
+    let lastScrollY = -1;
+    let stableCount = 0;
     
     const checkScroll = () => {
-      if (window.scrollY === lastScrollY) {
-        clearTimeout(scrollTimeout);
-        scrollTimeout = setTimeout(() => {
-          resolve();
-        }, 50);
+      const currentY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop;
+      const timeElapsed = Date.now() - startTime;
+      
+      // Check if scroll position is stable (not changing)
+      if (Math.abs(currentY - lastScrollY) < 1) {
+        stableCount++;
       } else {
-        lastScrollY = window.scrollY;
-        scrollTimeout = setTimeout(checkScroll, 50);
+        stableCount = 0;
       }
+      lastScrollY = currentY;
+      
+      // Check if we're at target position (within tolerance) and stable
+      if (Math.abs(currentY - targetY) <= tolerance && stableCount >= 2) {
+        resolve();
+        return;
+      }
+      
+      // Timeout after max wait time
+      if (timeElapsed > maxWaitTime) {
+        console.warn(`Scroll timeout: target ${targetY}, current ${currentY}, stable: ${stableCount}`);
+        resolve();
+        return;
+      }
+      
+      // Continue checking
+      requestAnimationFrame(checkScroll);
     };
     
-    requestAnimationFrame(() => {
-      checkScroll();
-    });
+    // Start checking immediately
+    requestAnimationFrame(checkScroll);
   });
 }
 

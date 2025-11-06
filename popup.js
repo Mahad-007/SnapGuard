@@ -35,22 +35,32 @@ captureBtn.addEventListener('click', async () => {
       throw new Error('No active tab found');
     }
     
-    // Inject content script and send capture message
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ['content.js']
-      });
-    } catch (e) {
-      // Content script might already be injected
-      console.log('Content script injection:', e.message);
-    }
-    
-    // Send message to content script to start capture
+    // Try to send message first (content script may already be injected)
     chrome.tabs.sendMessage(tab.id, { action: 'startCapture' }, (response) => {
       if (chrome.runtime.lastError) {
-        updateStatus('Error: ' + chrome.runtime.lastError.message, 'error');
-        captureBtn.disabled = false;
+        // Content script not injected yet, inject it
+        chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content.js']
+        }).then(() => {
+          // Wait a bit for script to initialize, then send message
+          setTimeout(() => {
+            chrome.tabs.sendMessage(tab.id, { action: 'startCapture' }, (response) => {
+              if (chrome.runtime.lastError) {
+                updateStatus('Error: ' + chrome.runtime.lastError.message, 'error');
+                captureBtn.disabled = false;
+                return;
+              }
+              
+              if (response && response.success) {
+                updateStatus('Scrolling and capturing...', 'info');
+              }
+            });
+          }, 100);
+        }).catch((e) => {
+          updateStatus('Error: Could not inject content script', 'error');
+          captureBtn.disabled = false;
+        });
         return;
       }
       
