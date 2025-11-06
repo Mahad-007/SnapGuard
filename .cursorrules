@@ -1,0 +1,70 @@
+# ============================
+#  Chrome Extension: Full Page Screenshot (MVP)
+#  Cursor AI Rules Configuration
+# ============================
+
+project:
+  name: "Full Page Screenshot Extension"
+  description: |
+    A simple, privacy-first Chrome extension that captures full-page (scrolling) screenshots.
+    The extension scrolls through the active webpage, captures visible segments, stitches them into one image,
+    and downloads the final PNG — all processed locally, no external APIs or network calls.
+
+goals:
+  - Build a Chrome Extension (Manifest V3) with a popup that has one button: “Capture Full Page”.
+  - The extension must automatically scroll through the page, capture each visible portion, and stitch them together.
+  - The entire process should happen locally, with no server communication or external dependencies.
+  - Final output: one stitched PNG image downloaded automatically.
+
+ai_behavior:
+  - Follow privacy-first principles. Do not add analytics, telemetry, or network requests.
+  - Keep UI minimal and functional. Avoid unnecessary animations, icons, or libraries.
+  - Use native Chrome APIs (e.g., chrome.tabs.captureVisibleTab, chrome.scripting) — no external screenshot libraries.
+  - Handle all logic in background, content, and popup scripts. Keep each script modular and commented.
+  - Use only vanilla JavaScript, HTML, and CSS (no frameworks).
+  - When stitching images, prefer Canvas API or OffscreenCanvas for performance.
+  - Respect Chrome Manifest V3 constraints (service_worker background, permissions limited to activeTab, scripting, downloads).
+  - Avoid using deprecated Manifest V2 methods.
+  - Add short, clear comments explaining the role of each file or function.
+  - Keep filenames lowercase and descriptive.
+
+file_structure:
+  - manifest.json        # Defines extension configuration and permissions
+  - background.js        # Handles capture logic and image stitching
+  - content.js           # Scrolls the page and coordinates with background
+  - popup.html           # Simple UI with "Capture Screenshot" button
+  - popup.js             # Connects popup UI to extension logic
+  - styles.css           # Basic styling for popup
+  - (optional) icons/    # 16x16, 48x48, 128x128 extension icons
+
+coding_style:
+  language: "JavaScript"
+  indentation: 2
+  comments: "Concise, meaningful, and beginner-friendly"
+  conventions:
+    - Use `const` and `let` (no `var`)
+    - Async/await for asynchronous operations
+    - Minimal DOM manipulation
+    - Use Chrome runtime messaging for communication between scripts
+
+testing:
+  - Extension should be loadable via chrome://extensions → Developer Mode → Load Unpacked.
+  - Verify on long web pages (Wikipedia, Medium, blogs).
+  - Ensure scrolling and stitching works without duplication or blank spaces.
+  - Validate that no console errors appear during operation.
+
+restrictions:
+  - No third-party APIs or libraries (except built-in browser APIs).
+  - No remote network requests.
+  - No unnecessary permissions beyond “activeTab”, “scripting”, and “downloads”.
+  - No code obfuscation or minification for clarity during development.
+
+documentation:
+  - Each JS file should include a header comment describing its purpose.
+  - The popup.html file should be clearly labeled for UI simplicity.
+  - Provide inline comments for scrolling logic and image stitching algorithm.
+
+next_steps:
+  - After MVP completion, add OCR (using tesseract.js) in a later phase.
+  - Consider adding export options (PDF, JPG) in later updates.
+
